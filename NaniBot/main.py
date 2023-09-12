@@ -42,4 +42,4 @@ async def votd(ctx):
   await ctx.send(quote)
 
 keep_alive()
-client.run('MTAzNjQ4MTc1Mjg1MzY0MzI5NA.GsM_cv.dFbNEejHrgESRmB7TuYB3Vdwb2o3SC7gYaYEKE')
+client.run(os.getenv('TOKEN'))
