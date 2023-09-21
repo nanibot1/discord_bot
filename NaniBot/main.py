@@ -191,10 +191,7 @@ async def birthday(ctx):
     await ctx.author.send(
       '**User Setup - Birthday**\n\nPlease provide your birth month and day\n\n**Example Usage: 08/28 (MM/DD)**\n_You have 30 seconds to reply_'
     )
-    msg = await client.wait_for('message',
-                                check=lambda x: x.author == ctx.author and x.
-                                channel == ctx.author.dm_channel,
-                                timeout=10)
+    msg = await client.wait_for('message', check=lambda x: x.author == ctx.author and x.channel == ctx.author.dm_channel, timeout=10)
     birthdate = datetime.strptime(msg.content, "%m/%d")
     await ctx.author.send('Your birthday has been set to: ' + "**" +
                           birthdate.strftime("%B %d") + "**")
