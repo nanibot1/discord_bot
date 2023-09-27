@@ -10,11 +10,6 @@ import pytz
 import requests
 
 
-class ExistingBirthday(Exception):
-  "Birthday already exists!"
-  pass
-
-
 client = commands.Bot(command_prefix='$', intents=nextcord.Intents.all())
 client.remove_command('help')
 
@@ -182,10 +177,7 @@ async def votd(ctx):
   await ctx.send(quote)
 
 
-@client.command(
-  description=
-  "Gives you the option to input your birthday into the automated birthday system!"
-)
+@client.command(description = "Gives you the option to input your birthday into the automated birthday system!")
 async def birthday(ctx):
   try:
     await ctx.author.send(
@@ -193,29 +185,46 @@ async def birthday(ctx):
     )
     msg = await client.wait_for('message', check=lambda x: x.author == ctx.author and x.channel == ctx.author.dm_channel, timeout=10)
     birthdate = datetime.strptime(msg.content, "%m/%d")
-    await ctx.author.send('Your birthday has been set to: ' + "**" +
-                          birthdate.strftime("%B %d") + "**")
-    if birthdate.month >= 1 or birthdate.month <= 9:
+    await ctx.author.send('Your birthday has been set to: ' + "**" + birthdate.strftime("%B %d") + "**")
+    if (birthdate.month >= 1 or birthdate.month <= 9) and birthdate.day >= 10:
       birthdate = "0" + str(birthdate.month) + "/" + str(birthdate.day)
+    elif (birthdate.day >= 1 or birthdate.month <= 9) and birthdate.month >= 10:
+      birthdate = str(birthdate.month) + "/" + "0" + str(birthdate.day)
+    elif (birthdate.month >= 1 or birthdate.month <= 9) and (birthdate.day >= 1 or birthdate.month <= 9):
+      birthdate = "0" + str(birthdate.month) + "/" + "0" + str(birthdate.day)
     else:
       birthdate = str(birthdate.month) + "/" + str(birthdate.day)
-    with open('birthdays.csv', 'a') as birthdays:
-      csv.writer(birthdays).writerow([ctx.author.id, birthdate])
+
+    with open('birthdays.csv', 'r') as birthdays:
+      csv_reader = csv.reader(birthdays)
+      birthday_list = list(csv_reader)
+      already_exist = False
+      for i in range(len(birthday_list)):
+        if birthday_list[i][0] == str(ctx.author.id):
+          birthday_list[i][1] = birthdate
+          already_exist = True
+
+      if already_exist == True:
+        writer = csv.writer(open('birthdays.csv', 'w'))
+        writer.writerows(birthday_list) 
+
+      else:
+        with open('birthdays.csv', 'w') as birthdays:
+          csv.writer(birthdays).writerows(birthday_list) 
+          csv.writer(birthdays).writerow([ctx.author.id, birthdate])
 
   except ValueError:
     await ctx.author.send('Invalid format. Please try again.')
   except TimeoutError:
     await ctx.author.send('Time has run out')
-  except ExistingBirthday:
-    await ctx.author.send('Birthday already exists!')
 
 
 async def daily_loop():
   while True:
-    now = datetime.now(pytz.timezone('US/Pacific'))
-    then = now.replace(hour=0, minute=0, second=0,
+    today = datetime.now(pytz.timezone('US/Pacific'))
+    then = today.replace(hour=0, minute=0, second=0,
                        microsecond=0) + timedelta(days=1)
-    wait_time = (then - now).total_seconds()
+    wait_time = (then - today).total_seconds()
     await asyncio.sleep(wait_time)
 
     # VOTD
@@ -223,18 +232,21 @@ async def daily_loop():
     await votd_channel.send(get_quote())
 
     # Birthday Check
-    today_month = now.month
-    today_day = now.day
-    if today_month >= 1 or today_month <= 9:
-      birthdate = "0" + str(today_month) + "/" + str(today_day)
+    if (today.month >= 1 or today.month <= 9) and today.day >= 10:
+      today = "0" + str(today.month) + "/" + str(today.day)
+    elif (today.day >= 1 or today.month <= 9) and today.month >= 10:
+      today = str(today.month) + "/" + "0" + str(today.day)
+    elif (today.month >= 1 or today.month <= 9) and (today.day >= 1 or today.month <= 9):
+      today = "0" + str(today.month) + "/" + "0" + str(today.day)
     else:
-      birthdate = str(today_month) + "/" + str(today_day)
+      today = str(today.month) + "/" + str(today.day)
     with open('birthdays.csv') as birthdays:
       csv_reader = csv.reader(birthdays)
       for index, birthday in enumerate(csv_reader):
-        if birthdate == birthday[1]:
-          await client.get_channel(1036517362989535292).send(
-            f"Happy Birthday <@{birthday[0]}>!")
+        print(type(today))
+        print(type(birthday[1]))
+        if today == str(birthday[1]):
+          await client.get_channel(1036517362989535292).send(f"Happy Birthday <@{birthday[0]}>!")
 
 
 # Program on
