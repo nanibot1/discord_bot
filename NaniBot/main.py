@@ -1,13 +1,15 @@
 import asyncio
 import csv
-from datetime import date, datetime, timedelta
-import nextcord
-from nextcord.ext import commands, tasks
+from datetime import datetime, timedelta
 import json
 from keep_alive import keep_alive
+import nextcord
+from nextcord.ext import commands
 import os
 import pytz
 import requests
+import nextwave as wavelink
+from nextwave.ext import spotify
 
 
 client = commands.Bot(command_prefix='$', intents=nextcord.Intents.all())
@@ -18,7 +20,213 @@ client.remove_command('help')
 @client.event
 async def on_ready():
   print('We have logged in as {0.user}'.format(client))
+  client.loop.create_task(node_connect())
   await daily_loop()  # Birthday Check + VOTD
+
+# Sets Up Music Bot
+@client.event
+async def on_wavelink_node_ready(node: wavelink.Node):
+  print(f"Node {node.identifier} is ready!")
+
+# Create Music Bot Node
+async def node_connect():
+  await client.wait_until_ready()
+  await wavelink.NodePool.create_node(bot=client, host='oce-lavalink.lexnet.cc', port=443, password='lexn3tl@val!nk', https=True, spotify_client=spotify.SpotifyClient(client_id=os.getenv('client_id'), client_secret=os.getenv('client_secret')))
+
+# Music Bot Queue Function
+@client.event
+async def on_wavelink_track_end(player: wavelink.Player, track: wavelink.Track, reason):
+  ctx = player.ctx
+  vc: player = ctx.voice_client
+
+  if vc.loop:
+    return await vc.play(track)
+
+  next_song = vc.queue.get()
+  await vc.play(next_song)
+  await ctx.send(f"Now playing: {next_song.title}")
+
+# Music Bot Play Command
+@client.command(description = "Plays a song from YouTube.  Type $play <song> to use.")
+async def play(ctx: commands.Context, *, search: wavelink.YouTubeTrack):
+  if not ctx.voice_client:
+    vc: wavelink.Player = await ctx.author.voice.channel.connect(cls=wavelink.Player)
+  elif not getattr(ctx.author.voice, "channel", None):
+    return await ctx.send("Join a voice channel first!")
+  else:
+    vc: wavelink.Player = ctx.voice_client
+
+  if vc.queue.is_empty and not vc.is_playing():
+    await vc.play(search)
+    await ctx.send(f"Now playing: {search.title}")
+
+  else:
+    await vc.queue.put_wait(search)
+    await ctx.send(f"Added {search.title} to the queue.")
+
+  vc.ctx = ctx
+  setattr(vc, "loop", False)
+
+# Music Bot Pause Command
+@client.command(description = "Pauses the current song.")
+async def pause(ctx: commands.Context):
+  if not ctx.voice_client:
+    return await ctx.send("I'm not playing anything!")
+  elif not getattr(ctx.author.voice, "channel", None):
+    return await ctx.send("Join a voice channel first!")
+  else:
+    vc: wavelink.Player = ctx.voice_client
+
+  await vc.pause()
+  await ctx.send("Music paused!")
+
+# Music Bot Resume Command
+@client.command(description = "Resumes the current song.")
+async def resume(ctx: commands.Context):
+  if not ctx.voice_client:
+    return await ctx.send("I'm not playing anything!")
+  elif not getattr(ctx.author.voice, "channel", None):
+    return await ctx.send("Join a voice channel first!")
+  else:
+    vc: wavelink.Player = ctx.voice_client
+
+  await vc.resume()
+  await ctx.send("Music resumed!")
+
+# Music Bot Skip Command
+@client.command(description = "Skips the current song.")
+async def skip(ctx: commands.Context):
+  if not ctx.voice_client:
+    return await ctx.send("I'm not playing anything!")
+  elif not getattr(ctx.author.voice, "channel", None):
+    return await ctx.send("Join a voice channel first!")
+  else:
+    vc: wavelink.Player = ctx.voice_client
+
+  await vc.stop()
+  await ctx.send("Music skipped!")
+
+# Music Bot Disconnect Command
+@client.command(description = "Disconnects the bot from the voice channel.")
+async def disconnect(ctx: commands.Context):
+  if not ctx.voice_client:
+    return await ctx.send("I'm not playing anything!")
+  elif not getattr(ctx.author.voice, "channel", None):
+    return await ctx.send("Join a voice channel first!")
+  else:
+    vc: wavelink.Player = ctx.voice_client
+
+  await vc.disconnect()
+  await ctx.send("Music stopped!")
+
+# Music Bot Loop Command
+@client.command(description = "Loops the current song.")
+async def loop(ctx: commands.Context):
+  if not ctx.voice_client:
+    return await ctx.send("I'm not playing anything!")
+  elif not getattr(ctx.author.voice, "channel", None):
+    return await ctx.send("Join a voice channel first!")
+  else:
+    vc: wavelink.Player = ctx.voice_client
+
+  if not vc.is_playing():
+    return await ctx.send("I'm not playing anything!")
+
+  try: 
+    vc.loop ^= True
+  except:
+    setattr(vc, "loop", False)
+
+  if vc.loop:
+    return await ctx.send("Loop is now enabled!")
+  else:
+    return await ctx.send("Loop is now disabled!")
+
+# Music Bot Queue Command
+@client.command(description = "Shows the current queue.")
+async def queue(ctx: commands.Context):
+  if not ctx.voice_client:
+    return await ctx.send("I'm not playing anything!")
+  elif not getattr(ctx.author.voice, "channel", None):
+    return await ctx.send("Join a voice channel first!")
+  else:
+    vc: wavelink.Player = ctx.voice_client
+
+  if vc.queue.is_empty:
+    return await ctx.send("There are no songs in the queue")
+
+  em = nextcord.Embed(title="Song Queue", description="", color=nextcord.Color.blurple())
+
+  queue = vc.queue.copy()
+  song_count = 0
+  for song in queue:
+    song_count += 1
+    em.add_field(name=f"Song Number {song_count}", value=f"{song.title}", inline=False)
+
+  return await ctx.send(embed=em)
+
+# Music Bot Volume Command
+@client.command()
+async def volume(ctx: commands.Context, volume: int):
+  if not ctx.voice_client:
+    return await ctx.send("I'm not playing anything!")
+  elif not getattr(ctx.author.voice, "channel", None):
+    return await ctx.send("Join a voice channel first!")
+  else:
+    vc: wavelink.Player = ctx.voice_client
+
+  if volume > 100:
+    return await ctx.send("The volume can not be over 100%.")
+  elif volume < 0:
+    return await ctx.send("The volume can not be under 0%.")
+  else:
+    await ctx.send(f"Setting the volume to {volume}%")
+  return await vc.set_volume(volume)
+
+# Music Bot Now Playing Command
+@client.command()
+async def nowplaying(ctx: commands.Context):
+  if not ctx.voice_client:
+    return await ctx.send("I'm not playing anything!")
+  elif not getattr(ctx.author.voice, "channel", None):
+    return await ctx.send("Join a voice channel first!")
+  else:
+    vc: wavelink.Player = ctx.voice_client
+
+  if not vc.is_playing():
+    return await ctx.send("I'm not playing anything!")
+
+  em = nextcord.Embed(title=f"Now Playing {vc.track.title}", description=f"Artist: {vc.track.author}")
+  em.add_field(name="Duration", value=f"{str(datetime.timedelta(seconds=vc.track.length))}")
+  em.add_field(name="Extra Info", value=f"Song URL: [Click Here]({str(vc.track.uri)})")
+  return await ctx.send(embed=em)
+
+@client.command()
+async def splay(ctx: commands.Context, *, search: str):
+  if not ctx.voice_client:
+    vc: wavelink.Player = await ctx.author.voice.channel.connect(cls=wavelink.Player)
+  elif not getattr(ctx.author.voice, "channel", None):
+    return await ctx.send("Join a voice channel first!")
+  else:
+    vc: wavelink.Player = ctx.voice_client
+
+  if vc.queue.is_empty and not vc.is_playing():
+    try:
+      track = await spotify.SpotifyTrack.search(query=search, return_first=True)
+      await vc.play(track)
+      await ctx.send(f"Now playing: {track.title}")
+    except Exception as e:
+      await ctx.send("I couldn't find that song.")
+      return print(e)
+
+  else:
+    await vc.queue.put_wait(search)
+    await ctx.send(f"Added {search.title} to the queue.")
+
+  vc.ctx = ctx
+  if vc.loop:
+    return
+  setattr(vc, "loop", False)
 
 
 # New Member Join Event
@@ -243,10 +451,12 @@ async def daily_loop():
     with open('birthdays.csv') as birthdays:
       csv_reader = csv.reader(birthdays)
       for index, birthday in enumerate(csv_reader):
-        print(type(today))
-        print(type(birthday[1]))
         if today == str(birthday[1]):
           await client.get_channel(1036517362989535292).send(f"Happy Birthday <@{birthday[0]}>!")
+
+@client.command()
+async def test(ctx):
+  await client.get_channel(1036517362989535292).send(f"Happy Birthday <@{322338993972969472}>!")
 
 
 # Program on
