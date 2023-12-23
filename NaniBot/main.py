@@ -9,7 +9,6 @@ import os
 import pytz
 import requests
 import nextwave as wavelink
-from nextwave.ext import spotify
 
 
 client = commands.Bot(command_prefix='$', intents=nextcord.Intents.all())
@@ -31,20 +30,31 @@ async def on_wavelink_node_ready(node: wavelink.Node):
 # Create Music Bot Node
 async def node_connect():
   await client.wait_until_ready()
-  await wavelink.NodePool.create_node(bot=client, host='oce-lavalink.lexnet.cc', port=443, password='lexn3tl@val!nk', https=True, spotify_client=spotify.SpotifyClient(client_id=os.getenv('client_id'), client_secret=os.getenv('client_secret')))
+  await wavelink.NodePool.create_node(bot=client, host='lavalink.lexnet.cc', port=443, password='lexn3tl@val!nk', https=True)
 
 # Music Bot Queue Function
 @client.event
-async def on_wavelink_track_end(player: wavelink.Player, track: wavelink.Track, reason):
-  ctx = player.ctx
-  vc: player = ctx.voice_client
+async def on_wavelink_track_end(player: wavelink.Player, track: wavelink.YouTubeTrack, reason):
+  try:
+    ctx = player.ctx
+    vc: player = ctx.voice_client
+
+  except nextcord.HTTPException:
+    interaction = player.interaction
+    vc: player = interaction.guild.voice_client
 
   if vc.loop:
     return await vc.play(track)
 
+  if vc.queue.is_empty:
+    return await vc.disconnect()
+
   next_song = vc.queue.get()
   await vc.play(next_song)
-  await ctx.send(f"Now playing: {next_song.title}")
+  try:
+    await ctx.send(f"Now playing: {next_song.title}")
+  except nextcord.HTTPException:
+    await interaction.send(f"Now playing: {next_song.title}")
 
 # Music Bot Play Command
 @client.command(description = "Plays a song from YouTube.  Type $play <song> to use.")
@@ -65,7 +75,10 @@ async def play(ctx: commands.Context, *, search: wavelink.YouTubeTrack):
     await ctx.send(f"Added {search.title} to the queue.")
 
   vc.ctx = ctx
-  setattr(vc, "loop", False)
+  try:
+    if vc.loop: return
+  except Exception:
+    setattr(vc, "loop", False)
 
 # Music Bot Pause Command
 @client.command(description = "Pauses the current song.")
@@ -76,6 +89,9 @@ async def pause(ctx: commands.Context):
     return await ctx.send("Join a voice channel first!")
   else:
     vc: wavelink.Player = ctx.voice_client
+
+  if not vc.is_playing():
+    return await ctx.send("I'm not playing anything!")
 
   await vc.pause()
   await ctx.send("Music paused!")
@@ -90,6 +106,9 @@ async def resume(ctx: commands.Context):
   else:
     vc: wavelink.Player = ctx.voice_client
 
+  if vc.is_playing():
+    return await ctx.send("I'm already playing!")
+
   await vc.resume()
   await ctx.send("Music resumed!")
 
@@ -103,8 +122,18 @@ async def skip(ctx: commands.Context):
   else:
     vc: wavelink.Player = ctx.voice_client
 
+  if not vc.is_playing():
+    return await ctx.send("I'm not playing anything!")
+
   await vc.stop()
   await ctx.send("Music skipped!")
+
+  try:
+    next_song = vc.queue.get()
+    await vc.play(next_song)
+    await ctx.send(content=f"Now Playing `{next_song}`")
+  except Exception:
+    return await ctx.send("The queue is empty!")
 
 # Music Bot Disconnect Command
 @client.command(description = "Disconnects the bot from the voice channel.")
@@ -120,7 +149,7 @@ async def disconnect(ctx: commands.Context):
   await ctx.send("Music stopped!")
 
 # Music Bot Loop Command
-@client.command(description = "Loops the current song.")
+@client.command(description = "BUGGED Loops the current song.")
 async def loop(ctx: commands.Context):
   if not ctx.voice_client:
     return await ctx.send("I'm not playing anything!")
@@ -163,10 +192,10 @@ async def queue(ctx: commands.Context):
     song_count += 1
     em.add_field(name=f"Song Number {song_count}", value=f"{song.title}", inline=False)
 
-  return await ctx.send(embed=em)
+  await ctx.send(embed=em)
 
 # Music Bot Volume Command
-@client.command()
+@client.command(description = "Changes the volume of the current song.")
 async def volume(ctx: commands.Context, volume: int):
   if not ctx.voice_client:
     return await ctx.send("I'm not playing anything!")
@@ -184,7 +213,7 @@ async def volume(ctx: commands.Context, volume: int):
   return await vc.set_volume(volume)
 
 # Music Bot Now Playing Command
-@client.command()
+@client.command(description = "Shows the current song playing.")
 async def nowplaying(ctx: commands.Context):
   if not ctx.voice_client:
     return await ctx.send("I'm not playing anything!")
@@ -197,36 +226,9 @@ async def nowplaying(ctx: commands.Context):
     return await ctx.send("I'm not playing anything!")
 
   em = nextcord.Embed(title=f"Now Playing {vc.track.title}", description=f"Artist: {vc.track.author}")
-  em.add_field(name="Duration", value=f"{str(datetime.timedelta(seconds=vc.track.length))}")
+  em.add_field(name="Duration", value=f"{str(timedelta(seconds=vc.track.length))}")
   em.add_field(name="Extra Info", value=f"Song URL: [Click Here]({str(vc.track.uri)})")
   return await ctx.send(embed=em)
-
-@client.command()
-async def splay(ctx: commands.Context, *, search: str):
-  if not ctx.voice_client:
-    vc: wavelink.Player = await ctx.author.voice.channel.connect(cls=wavelink.Player)
-  elif not getattr(ctx.author.voice, "channel", None):
-    return await ctx.send("Join a voice channel first!")
-  else:
-    vc: wavelink.Player = ctx.voice_client
-
-  if vc.queue.is_empty and not vc.is_playing():
-    try:
-      track = await spotify.SpotifyTrack.search(query=search, return_first=True)
-      await vc.play(track)
-      await ctx.send(f"Now playing: {track.title}")
-    except Exception as e:
-      await ctx.send("I couldn't find that song.")
-      return print(e)
-
-  else:
-    await vc.queue.put_wait(search)
-    await ctx.send(f"Added {search.title} to the queue.")
-
-  vc.ctx = ctx
-  if vc.loop:
-    return
-  setattr(vc, "loop", False)
 
 
 # New Member Join Event
@@ -315,10 +317,6 @@ async def on_raw_reaction_remove(payload):
                                    guild.members)
       if member is not None:
         await member.remove_roles(role)
-
-
-# Commands
-
 
 # Help Command
 @client.command(description="Gives the list of commands for NaniBot")
